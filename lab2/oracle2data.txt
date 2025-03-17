@@ -1,0 +1,107 @@
+BEGIN
+  FOR rec IN (SELECT table_name FROM user_tables) LOOP
+    EXECUTE IMMEDIATE 'DROP TABLE ' || rec.table_name || ' CASCADE CONSTRAINTS';
+  END LOOP;
+END;
+/
+
+--tworzenie tabeli z HR
+ 
+CREATE TABLE employees AS
+SELECT * FROM HR.employees;
+
+
+-- Dodanie klucza głównego do tabeli na kolumnie przykład:
+ 
+ALTER TABLE COUNTRIES
+ADD CONSTRAINT pk_countries PRIMARY KEY (country_id);
+ 
+-- Dodanie klucza obcego do tabeli COUNTRIES na kolumnie , który odnosi się do kolumny w tabeli przykład:
+
+ALTER TABLE COUNTRIES
+ADD CONSTRAINT fk_countries_region FOREIGN KEY (region_id)
+REFERENCES REGIONS(region_id);
+
+SELECT last_name || ' ' || salary AS wynagrodzenie
+FROM employees
+WHERE department_id IN (20, 50)
+  AND salary BETWEEN 2000 AND 7000
+ORDER BY last_name;
+ 
+SELECT hire_date, last_name, &wybrana_kolumna
+FROM employees
+WHERE manager_id IS NOT NULL
+  AND EXTRACT(YEAR FROM hire_date) = 2005
+ORDER BY &wybrana_kolumna;
+ 
+SELECT first_name || ' ' || last_name AS pelne_imie_nazwisko,
+       salary,
+       phone_number
+FROM employees
+WHERE SUBSTR(last_name, 3, 1) = 'e'
+  AND first_name LIKE '%' || '&czesc_imienia' || '%'
+ORDER BY 1 DESC, 2 ASC;
+ 
+SELECT first_name,
+       last_name,
+       ROUND(MONTHS_BETWEEN(SYSDATE, hire_date)) AS miesiecy_przepracowanych,
+       CASE 
+         WHEN ROUND(MONTHS_BETWEEN(SYSDATE, hire_date)) < 150 THEN salary * 0.10
+         WHEN ROUND(MONTHS_BETWEEN(SYSDATE, hire_date)) BETWEEN 150 AND 200 THEN salary * 0.20
+         ELSE salary * 0.30
+       END AS wysokosc_dodatku
+FROM employees
+ORDER BY miesiecy_przepracowanych;
+ 
+SELECT department_id,
+       ROUND(SUM(salary)) AS suma_zarobkow,
+       ROUND(AVG(salary)) AS srednia_zarobkow
+FROM employees
+GROUP BY department_id
+HAVING MIN(salary) > 5000;
+ 
+SELECT e.last_name,
+       d.department_id,
+       d.department_name,
+       e.job_id
+FROM employees e
+JOIN departments d ON e.department_id = d.department_id
+JOIN locations l ON d.location_id = l.location_id
+WHERE l.city = 'Toronto';
+ 
+SELECT e1.first_name || ' ' || e1.last_name AS jennifer,
+       e2.first_name || ' ' || e2.last_name AS wspolpracownik
+FROM employees e1
+JOIN employees e2 ON e1.department_id = e2.department_id
+WHERE e1.first_name = 'Jennifer'
+  AND e2.employee_id <> e1.employee_id;
+ 
+SELECT d.department_id, d.department_name
+FROM departments d
+LEFT JOIN employees e ON d.department_id = e.department_id
+WHERE e.employee_id IS NULL;
+ 
+SELECT e.first_name,
+       e.last_name,
+       e.job_id,
+       d.department_name,
+       e.salary,
+       jg.grade
+FROM employees e
+JOIN departments d ON e.department_id = d.department_id
+LEFT JOIN job_grades jg 
+  ON e.salary BETWEEN jg.min_salary AND jg.max_salary;
+ 
+SELECT first_name, last_name, salary
+FROM employees
+WHERE salary > (SELECT AVG(salary) FROM employees)
+ORDER BY salary DESC;
+ 
+SELECT employee_id, first_name, last_name
+FROM employees
+WHERE department_id IN (
+    SELECT DISTINCT department_id
+    FROM employees
+    WHERE last_name LIKE '%u%'
+);
+ 
