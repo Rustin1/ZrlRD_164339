@@ -1,0 +1,149 @@
+-- 1. Ranking pracowników oparty na wysokości pensji  +
+ 
+SELECT
+    last_name,
+    salary,
+    RANK() OVER (ORDER BY salary DESC) AS salary_rank
+FROM employees;
+ 
+-- 2. Całkowita suma pensji wszystkich pracowników  +
+ 
+SELECT
+    last_name,
+    salary,
+    SUM(salary) OVER () AS total_salary_sum
+FROM employees;
+ 
+-- 3.1 Kopiowanie tabeli sales od użytkownika HR  +
+ 
+CREATE TABLE sales AS
+SELECT *
+FROM HR.sales;
+ 
+-- 3.2 Kopiowanie tabeli products od użytkownika HR  +
+ 
+CREATE TABLE products AS
+SELECT *
+FROM HR.products;
+ 
+
+-- 4. Dla każdego pracownika wypisz: nazwisko, nazwę produktu, skumulowaną wartość sprzedaży dla pracownika, ranking wartości sprzedaży względem wszystkich zamówień. +
+SELECT e.last_name, p.product_name, s.quantity * s.price, RANK () OVER (ORDER BY s.quantity * s.price desc) as sale_rank
+FROM employees e
+JOIN sales s ON e.employee_id = s.employee_id
+JOIN products p ON s.product_id = p.product_id
+ 
+-- 5. Dla każdego wiersza z tabeli sales - nazwisko pracownika, nazwa produktu, cena, liczba transakcji, suma zapłacona, poprzednia i następna cena   +
+ 
+SELECT
+    e.last_name,
+    p.product_name,
+    s.price,
+    COUNT(s.sale_id) OVER (PARTITION BY s.product_id, s.sale_date) AS transaction_count,
+    SUM(s.price * s.quantity) OVER (PARTITION BY s.product_id, s.sale_date) AS total_amount_paid,
+    LAG(s.price) OVER (PARTITION BY s.product_id ORDER BY s.sale_date) AS previous_price,
+    LEAD(s.price) OVER (PARTITION BY s.product_id ORDER BY s.sale_date) AS next_price
+FROM sales s
+JOIN employees e ON s.employee_id = e.employee_id
+JOIN products p ON s.product_id = p.product_id;
+ 
+-- 6.Dla każdego wiersza wypisać nazwę produktu, cenę produktu, sumę całkowitą zapłaconą w danym miesiącu oraz sumę rosnącą zapłaconą w danym miesiącu za konkretny produkt +
+ 
+SELECT
+    p.product_name,
+    s.price,
+    TO_CHAR(s.sale_date, 'YYYY-MM') AS sale_month,
+    SUM(s.price * s.quantity) AS total_paid_per_month,
+    SUM(SUM(s.price * s.quantity)) OVER (PARTITION BY p.product_name ORDER BY TO_CHAR(s.sale_date, 'YYYY-MM')) AS cumulative_paid_per_month
+FROM sales s
+JOIN products p ON s.product_id = p.product_id
+GROUP BY p.product_name, s.price, TO_CHAR(s.sale_date, 'YYYY-MM')
+ORDER BY p.product_name, sale_month;
+ 
+ 
+-- 7. Wypisanie ceny produktu w latach 2022 i 2023, różnica cen, kategoria produktu  +
+ 
+SELECT
+    p.product_name,
+    p.product_category,
+    MAX(CASE WHEN EXTRACT(YEAR FROM s.sale_date) = 2022 THEN s.price END) AS price_2022,
+    MAX(CASE WHEN EXTRACT(YEAR FROM s.sale_date) = 2023 THEN s.price END) AS price_2023,
+    MAX(CASE WHEN EXTRACT(YEAR FROM s.sale_date) = 2023 THEN s.price END) -
+    MAX(CASE WHEN EXTRACT(YEAR FROM s.sale_date) = 2022 THEN s.price END) AS price_difference
+FROM products p
+JOIN sales s ON p.product_id = s.product_id
+WHERE EXTRACT(YEAR FROM s.sale_date) IN (2022, 2023)
+GROUP BY p.product_name, p.product_category;
+ 
+-- 8. Kategoria, nazwa produktu, cena, minimalna i maksymalna cena w kategorii oraz różnica między nimi  +
+ 
+SELECT
+    p.product_category,
+    p.product_name,
+    s.price,
+    MIN(s.price) OVER (PARTITION BY p.product_category) AS min_price,
+    MAX(s.price) OVER (PARTITION BY p.product_category) AS max_price,
+    MAX(s.price) OVER (PARTITION BY p.product_category) - MIN(s.price) OVER (PARTITION BY p.product_category) AS price_difference
+FROM products p
+JOIN sales s ON p.product_id = s.product_id;
+ 
+-- 9. Średnia krocząca ceny produktu (poprzednia, bieżąca i następna cena)   +
+ 
+SELECT
+    p.product_name,
+    s.sale_date,
+    LAG(s.price) OVER (PARTITION BY p.product_name ORDER BY s.sale_date) AS previous_price,
+    s.price AS current_price,
+    LEAD(s.price) OVER (PARTITION BY p.product_name ORDER BY s.sale_date) AS next_price,
+    (LAG(s.price) OVER (PARTITION BY p.product_name ORDER BY s.sale_date) +
+     s.price +
+     LEAD(s.price) OVER (PARTITION BY p.product_name ORDER BY s.sale_date)) / 3 AS moving_average
+FROM products p
+JOIN sales s ON p.product_id = s.product_id;
+ 
+ 
+-- 10. Ranking cen w ramach kategorii (gęsty ranking)  +
+ 
+SELECT
+    p.product_name,
+    p.product_category,
+    RANK() OVER (PARTITION BY p.product_category ORDER BY s.price) AS price_rank,
+    DENSE_RANK() OVER (PARTITION BY p.product_category ORDER BY s.price) AS dense_price_rank
+FROM products p
+JOIN sales s ON p.product_id = s.product_id;
+ 
+-- 11. Skumulowana wartość sprzedaży według dat oraz globalny ranking sprzedaży  +
+
+SELECT
+    sales_data.last_name,
+    sales_data.product_name,
+    sales_data.sale_date,
+    sales_data.cumulative_sales_value,
+    RANK() OVER (ORDER BY sales_data.cumulative_sales_value DESC) AS global_sales_rank
+FROM (
+    SELECT
+        e.last_name,
+        p.product_name,
+        s.sale_date,
+        s.employee_id,
+        s.sale_id,
+        -- Obliczanie skumulowanej wartości sprzedaży w zależności od daty
+        SUM(s.sale_id) OVER (PARTITION BY s.employee_id, p.product_name ORDER BY s.sale_date) AS cumulative_sales_value
+    FROM
+        employees e
+    JOIN sales s ON e.employee_id = s.employee_id
+    JOIN products p ON s.product_id = p.product_id
+) sales_data;
+
+    
+        
+-- 12.. Imiona i nazwiska pracowników oraz ich stanowisko, którzy uczestniczyli w sprzedaży (bez funkcji okienkowych) +
+SELECT
+    e.first_name,
+    e.last_name,
+    j.job_title
+FROM sales s
+JOIN employees e ON s.employee_id = e.employee_id
+JOIN jobs j ON e.job_id = j.job_id 
+JOIN products p ON s.product_id = p.product_id
+GROUP BY e.first_name, e.last_name, j.job_title;  
