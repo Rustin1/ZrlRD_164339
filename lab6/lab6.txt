@@ -1,0 +1,254 @@
+-- FUNKCJE
+
+-- 1. Funkcja zwracająca nazwę pracy (job_title) na podstawie job_id
+CREATE OR REPLACE FUNCTION get_job_title(p_job_id JOBS.job_id%TYPE)
+RETURN VARCHAR2 IS
+  v_title JOBS.job_title%TYPE;
+BEGIN
+  SELECT job_title INTO v_title FROM jobs WHERE job_id = p_job_id;
+  RETURN v_title;
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    RAISE_APPLICATION_ERROR(-20001, 'Nie znaleziono pracy o podanym ID');
+END;
+/
+
+-- 2. Funkcja zwracająca roczne zarobki pracownika
+CREATE OR REPLACE FUNCTION get_annual_salary(p_emp_id EMPLOYEES.employee_id%TYPE)
+RETURN NUMBER IS
+  v_salary EMPLOYEES.salary%TYPE;
+  v_comm   EMPLOYEES.commission_pct%TYPE;
+BEGIN
+  SELECT salary, NVL(commission_pct, 0) INTO v_salary, v_comm FROM employees WHERE employee_id = p_emp_id;
+  RETURN (v_salary * 12) + (v_salary * v_comm);
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    RAISE_APPLICATION_ERROR(-20002, 'Nie znaleziono pracownika');
+END;
+/
+
+-- 3. Funkcja wyciągająca numer kierunkowy z telefonu
+CREATE OR REPLACE FUNCTION extract_area_code(p_phone VARCHAR2)
+RETURN VARCHAR2 IS
+  v_code VARCHAR2(10);
+BEGIN
+  v_code := SUBSTR(p_phone, INSTR(p_phone, '(')+1, INSTR(p_phone, ')') - INSTR(p_phone, '(') - 1);
+  RETURN v_code;
+END;
+/
+
+-- 4. Funkcja formatująca tekst – pierwsza i ostatnia litera wielka, reszta małe
+CREATE OR REPLACE FUNCTION format_name(p_text VARCHAR2)
+RETURN VARCHAR2 IS
+  v_len INTEGER := LENGTH(p_text);
+BEGIN
+  IF v_len < 2 THEN
+    RETURN UPPER(p_text);
+  ELSE
+    RETURN UPPER(SUBSTR(p_text,1,1)) ||
+           LOWER(SUBSTR(p_text,2,v_len-2)) ||
+           UPPER(SUBSTR(p_text,-1));
+  END IF;
+END;
+/
+
+-- 5. Funkcja przetwarzająca PESEL na datę urodzenia
+CREATE OR REPLACE FUNCTION pesel_to_date(p_pesel VARCHAR2)
+RETURN DATE IS
+  v_year VARCHAR2(2);
+  v_month VARCHAR2(2);
+  v_day VARCHAR2(2);
+  v_century NUMBER;
+  v_date DATE;
+BEGIN
+  v_year := SUBSTR(p_pesel,1,2);
+  v_month := SUBSTR(p_pesel,3,2);
+  v_day := SUBSTR(p_pesel,5,2);
+  
+  IF v_month BETWEEN '01' AND '12' THEN
+    v_century := 1900;
+  ELSIF v_month BETWEEN '21' AND '32' THEN
+    v_century := 2000;
+    v_month := TO_CHAR(TO_NUMBER(v_month) - 20);
+  ELSE
+    RAISE_APPLICATION_ERROR(-20003, 'Nieprawidłowy miesiąc w PESEL');
+  END IF;
+
+  v_date := TO_DATE(v_century + TO_NUMBER(v_year) || LPAD(v_month, 2, '0') || v_day, 'YYYYMMDD');
+  RETURN v_date;
+END;
+/
+
+-- 6. Funkcja zwracająca liczbę pracowników i departamentów w kraju
+CREATE OR REPLACE FUNCTION get_country_stats(p_country_name VARCHAR2)
+RETURN VARCHAR2 IS
+  v_country_id COUNTRIES.country_id%TYPE;
+  v_emp_count NUMBER;
+  v_dep_count NUMBER;
+BEGIN
+  SELECT country_id INTO v_country_id FROM countries WHERE country_name = p_country_name;
+
+  SELECT COUNT(*) INTO v_dep_count FROM departments WHERE location_id IN (
+    SELECT location_id FROM locations WHERE country_id = v_country_id);
+
+  SELECT COUNT(*) INTO v_emp_count FROM employees WHERE department_id IN (
+    SELECT department_id FROM departments WHERE location_id IN (
+      SELECT location_id FROM locations WHERE country_id = v_country_id));
+
+  RETURN 'Pracownicy: ' || v_emp_count || ', Departamenty: ' || v_dep_count;
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    RAISE_APPLICATION_ERROR(-20004, 'Nie znaleziono kraju o takiej nazwie');
+END;
+/
+
+-- WYZWALACZE
+
+-- 1. Archiwizacja usuniętych działów
+CREATE TABLE archiwum_departamentow (
+  id NUMBER,
+  nazwa VARCHAR2(100),
+  data_zamkniecia DATE,
+  ostatni_manager VARCHAR2(100)
+);
+
+CREATE OR REPLACE TRIGGER trg_archiwum_departamentow
+AFTER DELETE ON departments
+FOR EACH ROW
+BEGIN
+  INSERT INTO archiwum_departamentow(id, nazwa, data_zamkniecia, ostatni_manager)
+  VALUES (:OLD.department_id, :OLD.department_name, SYSDATE,
+         (SELECT first_name || ' ' || last_name FROM employees WHERE employee_id = :OLD.manager_id));
+END;
+/
+
+-- 2. Ograniczenie i logowanie przy nieprawidłowych zarobkach
+CREATE TABLE zlodziej (
+  id NUMBER GENERATED ALWAYS AS IDENTITY,
+  uzytkownik VARCHAR2(30),
+  czas_zmiany TIMESTAMP
+);
+
+CREATE OR REPLACE TRIGGER trg_wynagrodzenie_check
+BEFORE INSERT OR UPDATE ON employees
+FOR EACH ROW
+BEGIN
+  IF :NEW.salary < 2000 OR :NEW.salary > 26000 THEN
+    INSERT INTO zlodziej(uzytkownik, czas_zmiany)
+    VALUES (USER, SYSTIMESTAMP);
+    RAISE_APPLICATION_ERROR(-20005, 'Nieprawidłowe wynagrodzenie!');
+  END IF;
+END;
+/
+
+-- 3. Sekwencja i auto_increment dla employees
+CREATE SEQUENCE seq_employees START WITH 3000;
+
+CREATE OR REPLACE TRIGGER trg_auto_id_employees
+BEFORE INSERT ON employees
+FOR EACH ROW
+WHEN (NEW.employee_id IS NULL)
+BEGIN
+  SELECT seq_employees.NEXTVAL INTO :NEW.employee_id FROM dual;
+END;
+/
+
+-- 4. Zabronienie modyfikacji tabeli JOB_GRADES
+CREATE OR REPLACE TRIGGER trg_block_job_grades
+BEFORE INSERT OR UPDATE OR DELETE ON job_grades
+BEGIN
+  RAISE_APPLICATION_ERROR(-20006, 'Operacje na tabeli JOB_GRADES są zabronione.');
+END;
+/
+
+-- 5. Zachowanie starych wartości min/max salary przy UPDATE
+CREATE OR REPLACE TRIGGER trg_protect_salary_range
+BEFORE UPDATE ON jobs
+FOR EACH ROW
+BEGIN
+  :NEW.min_salary := :OLD.min_salary;
+  :NEW.max_salary := :OLD.max_salary;
+END;
+/
+
+-- PAKIETY
+
+-- 1. Pakiet zawierający stworzone funkcje i procedury
+CREATE OR REPLACE PACKAGE pakiet_util AS
+  FUNCTION get_job_title(p_job_id VARCHAR2) RETURN VARCHAR2;
+  FUNCTION get_annual_salary(p_emp_id NUMBER) RETURN NUMBER;
+  FUNCTION format_name(p_text VARCHAR2) RETURN VARCHAR2;
+END pakiet_util;
+/
+
+CREATE OR REPLACE PACKAGE BODY pakiet_util AS
+  FUNCTION get_job_title(p_job_id VARCHAR2) RETURN VARCHAR2 IS
+    v_title VARCHAR2(100);
+  BEGIN
+    SELECT job_title INTO v_title FROM jobs WHERE job_id = p_job_id;
+    RETURN v_title;
+  EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+      RAISE_APPLICATION_ERROR(-20001, 'Job not found');
+  END;
+
+  FUNCTION get_annual_salary(p_emp_id NUMBER) RETURN NUMBER IS
+    v_salary NUMBER;
+    v_comm NUMBER;
+  BEGIN
+    SELECT salary, NVL(commission_pct, 0) INTO v_salary, v_comm
+    FROM employees WHERE employee_id = p_emp_id;
+    RETURN (v_salary * 12) + (v_salary * v_comm);
+  END;
+
+  FUNCTION format_name(p_text VARCHAR2) RETURN VARCHAR2 IS
+  BEGIN
+    RETURN UPPER(SUBSTR(p_text,1,1)) ||
+           LOWER(SUBSTR(p_text,2,LENGTH(p_text)-2)) ||
+           UPPER(SUBSTR(p_text,-1));
+  END;
+END pakiet_util;
+/
+
+-- 2. Pakiet CRUD dla tabeli REGIONS
+CREATE OR REPLACE PACKAGE regions_pkg AS
+  PROCEDURE insert_region(p_id NUMBER, p_name VARCHAR2);
+  PROCEDURE update_region(p_id NUMBER, p_name VARCHAR2);
+  PROCEDURE delete_region(p_id NUMBER);
+  FUNCTION get_region(p_id NUMBER) RETURN VARCHAR2;
+END regions_pkg;
+/
+
+CREATE OR REPLACE PACKAGE BODY regions_pkg AS
+  PROCEDURE insert_region(p_id NUMBER, p_name VARCHAR2) IS
+  BEGIN
+    INSERT INTO regions(region_id, region_name) VALUES (p_id, p_name);
+  END;
+
+  PROCEDURE update_region(p_id NUMBER, p_name VARCHAR2) IS
+  BEGIN
+    UPDATE regions SET region_name = p_name WHERE region_id = p_id;
+    IF SQL%ROWCOUNT = 0 THEN
+      RAISE_APPLICATION_ERROR(-20010, 'Region not found');
+    END IF;
+  END;
+
+  PROCEDURE delete_region(p_id NUMBER) IS
+  BEGIN
+    DELETE FROM regions WHERE region_id = p_id;
+    IF SQL%ROWCOUNT = 0 THEN
+      RAISE_APPLICATION_ERROR(-20011, 'Nothing deleted');
+    END IF;
+  END;
+
+  FUNCTION get_region(p_id NUMBER) RETURN VARCHAR2 IS
+    v_name VARCHAR2(50);
+  BEGIN
+    SELECT region_name INTO v_name FROM regions WHERE region_id = p_id;
+    RETURN v_name;
+  EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+      RETURN 'Nie znaleziono regionu';
+  END;
+END regions_pkg;
+/
