@@ -1,0 +1,91 @@
+-- 1. Utworzenie widoku pokazującego pracowników z pensją > 6000
+CREATE VIEW v_wysokie_pensje AS
+SELECT *
+FROM employees
+WHERE salary > 6000;
+
+-- 2. Zmiana definicji widoku: teraz pokazuje pracowników z pensją > 12000
+CREATE OR REPLACE VIEW v_wysokie_pensje AS
+SELECT *
+FROM employees
+WHERE salary > 12000;
+
+-- 3. Usunięcie widoku
+DROP VIEW v_wysokie_pensje;
+
+-- 4. Widok pokazujący pracowników z departamentu "Finance"
+CREATE VIEW v_finance_employees AS
+SELECT e.employee_id, e.last_name, e.first_name
+FROM employees e
+JOIN departments d ON e.department_id = d.department_id
+WHERE d.department_name = 'Finance';
+
+-- 5. Widok pracowników z pensją między 5000 a 12000
+CREATE VIEW v_srednie_pensje AS
+SELECT employee_id, last_name, first_name, salary, job_id, email, hire_date
+FROM employees
+WHERE salary BETWEEN 5000 AND 12000;
+
+-- 6. Operacje DML przez widok v_srednie_pensje
+
+-- a. Dodanie pracownika
+INSERT INTO v_srednie_pensje (employee_id, last_name, first_name, salary, job_id, email, hire_date)
+VALUES (999, 'Nowak', 'Jan', 7000, 'IT_PROG', 'jan.nowak@example.com', TO_DATE('2023-01-15','YYYY-MM-DD'));
+
+-- b. Edycja pracownika
+UPDATE v_srednie_pensje
+SET salary = 8000
+WHERE employee_id = 999;
+
+-- c. Usunięcie pracownika
+DELETE FROM v_srednie_pensje
+WHERE employee_id = 999;
+
+-- 7. Widok pokazujący statystyki działów zatrudniających co najmniej 4 pracowników
+CREATE VIEW v_statystyki_dzialow AS
+SELECT d.department_id, d.department_name,
+       COUNT(e.employee_id) AS liczba_pracownikow,
+       AVG(e.salary) AS srednia_pensja,
+       MAX(e.salary) AS maks_pensja
+FROM departments d
+JOIN employees e ON d.department_id = e.department_id
+GROUP BY d.department_id, d.department_name
+HAVING COUNT(e.employee_id) >= 4;
+
+-- a. Dodawanie do tego widoku nie jest możliwe – zawiera agregacje
+
+-- 8. Widok z warunkiem CHECK OPTION
+CREATE VIEW v_srednie_pensje_check AS
+SELECT employee_id, last_name, first_name, salary, job_id, email, hire_date
+FROM employees
+WHERE salary BETWEEN 5000 AND 12000
+WITH CHECK OPTION;
+
+-- a.i. Dodanie pracownika z pensją w dozwolonym zakresie – OK
+INSERT INTO v_srednie_pensje_check (employee_id, last_name, first_name, salary, job_id, email, hire_date)
+VALUES (1001, 'Kowalska', 'Anna', 9000, 'SA_REP', 'anna.kowalska@example.com', SYSDATE);
+
+-- a.ii. Dodanie pracownika z pensją spoza zakresu – BŁĄD
+INSERT INTO v_srednie_pensje_check (employee_id, last_name, first_name, salary, job_id, email, hire_date)
+VALUES (1002, 'Zielinski', 'Piotr', 13000, 'SA_MAN', 'piotr.z@example.com', SYSDATE);
+-- Powyższe zapytanie zakończy się błędem CHECK OPTION
+
+-- 9. Widok zmaterializowany pokazujący menedżerów i ich działy (Oracle)
+CREATE MATERIALIZED VIEW v_managerowie AS
+SELECT e.employee_id, e.first_name, e.last_name, d.department_name
+FROM employees e
+JOIN departments d ON e.department_id = d.department_id
+WHERE e.employee_id IN (
+    SELECT DISTINCT manager_id FROM employees WHERE manager_id IS NOT NULL
+);
+
+-- 10. Widok zawierający 10 najlepiej opłacanych pracowników
+CREATE VIEW v_najlepiej_oplacani AS
+SELECT *
+FROM (
+    SELECT *
+    FROM employees
+    ORDER BY salary DESC
+)
+WHERE ROWNUM <= 10;
+-- W PostgreSQL/MySQL użyj: SELECT * FROM employees ORDER BY salary DESC LIMIT 10;
