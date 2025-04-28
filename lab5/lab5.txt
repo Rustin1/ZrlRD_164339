@@ -1,0 +1,196 @@
+-- 1. Blok anonimowy: wyznacz maksymalny numer departamentu i dodaj nowy dział "EDUCATION"
+DECLARE
+  numer_max departments.department_id%TYPE;
+  nowa_nazwa departments.department_name%TYPE := 'EDUCATION';
+BEGIN
+  SELECT MAX(department_id) INTO numer_max FROM departments;
+  
+  INSERT INTO departments(department_id, department_name)
+  VALUES (numer_max + 10, nowa_nazwa);
+  
+  DBMS_OUTPUT.PUT_LINE('Dodano departament: ' || nowa_nazwa || ' o ID: ' || (numer_max + 10));
+END;
+/
+
+-- 2. Dodanie do poprzedniego bloku zmiany location_id na 3000
+DECLARE
+  numer_max departments.department_id%TYPE;
+  nowa_nazwa departments.department_name%TYPE := 'EDUCATION';
+BEGIN
+  SELECT MAX(department_id) INTO numer_max FROM departments;
+  
+  INSERT INTO departments(department_id, department_name, location_id)
+  VALUES (numer_max + 10, nowa_nazwa, 3000);
+  
+  DBMS_OUTPUT.PUT_LINE('Dodano departament: ' || nowa_nazwa || ' z location_id 3000');
+END;
+/
+
+-- 3. Tworzenie tabeli i wpisywanie liczb 1–10 bez 4 i 6
+CREATE TABLE nowa (
+  wartosc VARCHAR2(10)
+);
+
+BEGIN
+  FOR i IN 1..10 LOOP
+    IF i NOT IN (4, 6) THEN
+      INSERT INTO nowa(wartosc) VALUES (TO_CHAR(i));
+    END IF;
+  END LOOP;
+END;
+/
+
+-- 4. Wyciąganie danych z tabeli countries do zmiennej typu %ROWTYPE
+DECLARE
+  kraj countries%ROWTYPE;
+BEGIN
+  SELECT * INTO kraj FROM countries WHERE country_id = 'CA';
+  DBMS_OUTPUT.PUT_LINE('Kraj: ' || kraj.country_name || ', Region ID: ' || kraj.region_id);
+END;
+/
+
+-- 5. Kursor – wynagrodzenia i decyzja o podwyżce dla działu 50
+DECLARE
+  CURSOR kursor_prac IS
+    SELECT last_name, salary FROM employees WHERE department_id = 50;
+  pracownik kursor_prac%ROWTYPE;
+BEGIN
+  OPEN kursor_prac;
+  LOOP
+    FETCH kursor_prac INTO pracownik;
+    EXIT WHEN kursor_prac%NOTFOUND;
+    
+    IF pracownik.salary > 3100 THEN
+      DBMS_OUTPUT.PUT_LINE(pracownik.last_name || ' - nie dawać podwyżki');
+    ELSE
+      DBMS_OUTPUT.PUT_LINE(pracownik.last_name || ' - dać podwyżkę');
+    END IF;
+  END LOOP;
+  CLOSE kursor_prac;
+END;
+/
+
+-- 6. Kursor z parametrami widełek zarobków i fragmentem imienia
+DECLARE
+  CURSOR pracownicy_cursor(min_sal NUMBER, max_sal NUMBER, cz_imienia VARCHAR2) IS
+    SELECT first_name, last_name, salary
+    FROM employees
+    WHERE salary BETWEEN min_sal AND max_sal
+      AND LOWER(first_name) LIKE '%' || LOWER(cz_imienia) || '%';
+    
+  rekord pracownicy_cursor%ROWTYPE;
+BEGIN
+  -- a. Widełki 1000-5000, imię zawiera 'a'
+  DBMS_OUTPUT.PUT_LINE('--- Pracownicy: widełki 1000-5000, imię zawiera "a" ---');
+  FOR rekord IN pracownicy_cursor(1000, 5000, 'a') LOOP
+    DBMS_OUTPUT.PUT_LINE(rekord.first_name || ' ' || rekord.last_name || ' - ' || rekord.salary);
+  END LOOP;
+  
+  -- b. Widełki 5000-20000, imię zawiera 'u'
+  DBMS_OUTPUT.PUT_LINE('--- Pracownicy: widełki 5000-20000, imię zawiera "u" ---');
+  FOR rekord IN pracownicy_cursor(5000, 20000, 'u') LOOP
+    DBMS_OUTPUT.PUT_LINE(rekord.first_name || ' ' || rekord.last_name || ' - ' || rekord.salary);
+  END LOOP;
+END;
+/
+
+-- 9a. Procedura dodająca wiersz do tabeli Jobs
+CREATE OR REPLACE PROCEDURE dodaj_job (
+  p_job_id JOBS.job_id%TYPE,
+  p_job_title JOBS.job_title%TYPE
+) AS
+BEGIN
+  INSERT INTO jobs(job_id, job_title, min_salary, max_salary)
+  VALUES (p_job_id, p_job_title, NULL, NULL);
+  
+  DBMS_OUTPUT.PUT_LINE('Dodano nowy job: ' || p_job_id);
+EXCEPTION
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('Błąd przy dodawaniu job: ' || SQLERRM);
+END;
+/
+
+-- 9b. Procedura modyfikująca job_title z własnym wyjątkiem
+CREATE OR REPLACE PROCEDURE zmien_job_title (
+  p_job_id JOBS.job_id%TYPE,
+  p_nowy_title JOBS.job_title%TYPE
+) AS
+  v_liczba NUMBER;
+BEGIN
+  UPDATE jobs SET job_title = p_nowy_title WHERE job_id = p_job_id;
+  v_liczba := SQL%ROWCOUNT;
+  
+  IF v_liczba = 0 THEN
+    RAISE_APPLICATION_ERROR(-20001, 'Nie zaktualizowano żadnego joba');
+  ELSE
+    DBMS_OUTPUT.PUT_LINE('Zmieniono job_title na: ' || p_nowy_title);
+  END IF;
+EXCEPTION
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('Błąd: ' || SQLERRM);
+END;
+/
+
+-- 9c. Procedura usuwająca wiersz z tabeli Jobs
+CREATE OR REPLACE PROCEDURE usun_job (
+  p_job_id JOBS.job_id%TYPE
+) AS
+  v_liczba NUMBER;
+BEGIN
+  DELETE FROM jobs WHERE job_id = p_job_id;
+  v_liczba := SQL%ROWCOUNT;
+  
+  IF v_liczba = 0 THEN
+    RAISE_APPLICATION_ERROR(-20002, 'Nie usunięto żadnego joba');
+  ELSE
+    DBMS_OUTPUT.PUT_LINE('Usunięto job: ' || p_job_id);
+  END IF;
+EXCEPTION
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('Błąd przy usuwaniu joba: ' || SQLERRM);
+END;
+/
+
+-- 9d. Procedura pobierająca pensję i nazwisko na podstawie ID
+CREATE OR REPLACE PROCEDURE pobierz_dane_pracownika (
+  p_employee_id EMPLOYEES.employee_id%TYPE,
+  p_salary OUT EMPLOYEES.salary%TYPE,
+  p_last_name OUT EMPLOYEES.last_name%TYPE
+) AS
+BEGIN
+  SELECT salary, last_name
+  INTO p_salary, p_last_name
+  FROM employees
+  WHERE employee_id = p_employee_id;
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    DBMS_OUTPUT.PUT_LINE('Nie znaleziono pracownika.');
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('Błąd: ' || SQLERRM);
+END;
+/
+
+-- 9e. Procedura dodająca pracownika, z wyjątkiem przy pensji > 20000
+CREATE OR REPLACE PROCEDURE dodaj_pracownika (
+  p_last_name EMPLOYEES.last_name%TYPE,
+  p_first_name EMPLOYEES.first_name%TYPE,
+  p_salary EMPLOYEES.salary%TYPE,
+  p_job_id EMPLOYEES.job_id%TYPE
+) AS
+  v_new_id EMPLOYEES.employee_id%TYPE;
+BEGIN
+  IF p_salary > 20000 THEN
+    RAISE_APPLICATION_ERROR(-20003, 'Pensja zbyt wysoka!');
+  END IF;
+  
+  SELECT employees_seq.NEXTVAL INTO v_new_id FROM dual;
+  
+  INSERT INTO employees (employee_id, last_name, first_name, salary, job_id, hire_date)
+  VALUES (v_new_id, p_last_name, p_first_name, p_salary, p_job_id, SYSDATE);
+  
+  DBMS_OUTPUT.PUT_LINE('Dodano pracownika o ID: ' || v_new_id);
+EXCEPTION
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('Błąd: ' || SQLERRM);
+END;
+/
